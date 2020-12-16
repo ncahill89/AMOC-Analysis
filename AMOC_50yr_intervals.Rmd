@@ -1,0 +1,164 @@
+---
+title: "AMOC change in mean model (fixed change every 50 years)"
+author: "Niamh Cahill"
+date: "12/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = FALSE}
+# load in required packages
+library(R2jags)
+library(tidyverse)
+```
+
+```{r data}
+# Read in data 
+dat <- read_csv("data/Caesar.csv")
+# arrange by year
+dat <- dat %>% arrange(year)
+
+# Plot the data
+ggplot(dat, aes(x = year, y = y))+
+  geom_line() +
+  geom_ribbon(aes(ymax = lower,ymin = upper),alpha = 0.4)
+```
+
+```{r jags data}
+# get min and max years
+min_year <- dat$year %>% min
+max_year <- dat$year %>% max
+
+# observation years 
+year.j <- dat %>% pull(year)
+
+# get the vector of change points
+changes <- sort(c(seq(max_year,min_year,by = -50)))
+
+if(changes[1] != min_year)
+{
+  if((changes[1] - min_year) > 10)
+    changes <- c(min_year, changes)
+  else 
+  changes[1] <- min_year 
+}
+
+# get no. of changes
+n_changes <- length(changes)-1
+# no. of obs
+n <- length(dat$year)
+
+# get mean indexes for each obs (depending on change point)
+alpha_index <- rep(NA, n)
+alpha_index_upt <- alpha_index
+names <- rep(NA, n_changes)
+
+for(j in 1:n_changes)
+{
+for(i in 1:n)
+
+  {
+  alpha_index[i] <-  ifelse(changes[j] <= dat$year[i] && dat$year[i] < changes[j+1],j,alpha_index_upt[i])
+}
+  
+  alpha_index_upt <- alpha_index
+  names[j] <- paste0(floor(changes[j]),"-", floor(changes[j+1])-1)
+}
+alpha_index[n] <- n_changes
+names[1] <- paste0(floor(changes[1]),"-", floor(changes[2]))
+```
+
+```{r jags model, eval = FALSE}
+
+# Specify the JAGS model 
+
+cpmodel = "model
+{
+  
+  ###Data Loop 
+  for(j in 1:n_obs)
+  {
+  
+    y.j[j]~dnorm(interval_mean[alpha_index[j]],tau[j])
+  }
+  
+  ##Priors
+  for(c in 1:n_changes)
+  {
+  interval_mean[c] ~ dnorm(0, 0.001) 
+  }
+
+  sigma_err ~ dt(1,1,2^-2)T(0,)
+  tau <- 1/(sigma_err^(2) + sigma_y^(2))
+
+  
+}##End model
+"
+  
+  # The required data for JAGS
+  jags_data <- list(y.j = dat %>% pull(y),
+                    n_obs = length(year.j),
+                    sigma_y = (dat$upper - dat$lower)/4,
+                    alpha_index = alpha_index,
+                    n_changes = n_changes
+)
+  
+  # Parameters to look at
+  jags_pars <- c("interval_mean",
+                 "sigma_err")  
+  
+  
+  ########Run the model########
+  mod <- jags(data=jags_data, 
+              parameters.to.save=jags_pars, 
+              model.file = textConnection(cpmodel),
+              n.chains = 3, 
+              n.iter = 5000, 
+              n.burnin = 1000,
+              n.thin = 2 
+  )
+  
+  # save the model output
+  saveRDS(mod, file = "interval_output/Caesar_mod.rds")
+  
+```
+  
+```{r jags output, eval = FALSE}
+# View the model output and check convergence diagnostics
+print(mod)
+plot(mod)
+```
+
+```{r results}
+# Read in the posterior samples
+mod <- readRDS("interval_output/Caesar_mod.rds")
+post_samps <- mod$BUGSoutput$sims.list
+
+alpha_samps <- data.frame(post_samps$interval_mean[sample(1:6000,2000),])
+names(alpha_samps) <- names
+  
+# get the mean estimates and uncertainty
+alpha_dat <- alpha_samps %>% 
+                pivot_longer(everything(),
+                              values_to = "value", 
+                              names_to = "interval") %>% 
+                mutate(interval = factor(interval, levels = names, labels = names)) %>% 
+                group_by(interval) %>% 
+                summarise(est = mean(value),
+                          lwr = quantile(value, probs = 0.025),
+                          upr = quantile(value, probs = 0.975))
+               
+  
+# plot the mean estimates and uncertainty
+ggplot(alpha_dat, aes(x = interval, y = est)) +
+    geom_point() +
+    geom_errorbar(aes(ymin = lwr, ymax = upr)) +
+    theme_bw()+
+    theme(axis.text.x=element_text(angle=45,hjust=1)) +
+    xlab("") +
+    ylab("value")
+  
+```

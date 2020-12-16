@@ -1,0 +1,23 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1608115659961.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "51255681",
+    "id" : "F03B33CA",
+    "lastKnownWriteTime" : 1608114720,
+    "last_content_update" : 1608114720,
+    "path" : "~/Packages/AMOC-Analysis/AMOC_50yr_intervals.Rmd",
+    "project_path" : "AMOC_50yr_intervals.Rmd",
+    "properties" : {
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_markdown"
+}

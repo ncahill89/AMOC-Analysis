@@ -1,0 +1,135 @@
+---
+title: "AMOC change in mean model (single estimated change point)"
+author: "Niamh Cahill"
+date: "12/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = FALSE}
+# load in required packages
+library(R2jags)
+library(tidyverse)
+```
+
+```{r data}
+# Read in data 
+dat <- read_csv("data/Caesar.csv")
+# arrange by year
+dat <- dat %>% arrange(year)
+
+# Plot the data
+ggplot(dat, aes(x = year, y = y))+
+  geom_line() +
+  geom_ribbon(aes(ymax = lower,ymin = upper),alpha = 0.4)
+
+```
+
+```{r jags data}
+
+# Specify the JAGS CP model
+
+cpmodel = "model
+{
+  
+  ###Data Loop 
+  for(j in 1:n_obs)
+  {
+  C[j] <- 1+step(year.j[j] - omega)
+  y.j[j]~dnorm(alpha[C[j]],tau[j])
+  }
+  
+  ##Priors
+  alpha[1] ~ dnorm(0, 0.01) 
+  alpha[2] ~ dnorm(0, 0.01) 
+  
+  sigma_err ~ dt(1,1,2^-2)T(0,)
+  tau <- 1/(sigma_err^(2) + sigma_y^(2))
+  omega ~ dunif(year_min,year_max)
+  
+  
+}#End model
+"
+  
+
+# The required data for JAGS
+year.j <- dat %>% pull(year)
+
+# The required data
+jags_data <- list(y.j = dat %>% pull(y),
+                  year.j = year.j/1000,
+                  n_obs = length(year.j),
+                  sigma_y = (dat$upper - dat$lower)/4,
+                  year_min = min(year.j/1000),
+                  year_max = max(year.j/1000))
+
+# Parameters to look at
+jags_pars <- c("alpha",
+               "sigma_err",
+               "omega")  
+
+
+# Run the model
+mod <- jags(data=jags_data, 
+            parameters.to.save=jags_pars, 
+            model.file = textConnection(cpmodel),
+            n.chains = 3, 
+            n.iter = 5000, 
+            n.burnin = 1000,
+            n.thin = 2 
+)
+
+# Save the model object
+saveRDS(mod, file = "single_CP_output/Caesar_mod.rds")
+
+```
+
+```{r jags output, eval = FALSE}
+# View the model output and check convergence diagnostics
+print(mod)
+plot(mod)
+
+```
+
+```{r results} 
+# Read in the posterior samples
+mod <- readRDS("single_CP_output/Caesar_mod.rds")
+post_samps <- mod$BUGSoutput$sims.list
+
+# Get posterior samples for parameters
+par_samps <- suppressWarnings(as_tibble(post_samps$alpha) %>% 
+  rename_at(vars(V1:V2),~ c("alpha1","alpha2")) %>% 
+  mutate(omega = post_samps$omega) %>% 
+  mutate(diff = alpha1 - alpha2))
+
+# Get parameter estimates & uncertainty table
+change <- post_samps$omega %>% mean*1000 %>% round(2)
+lower_change <- quantile(par_samps$omega, probs = 0.025)*1000 %>% round(2)
+upper_change <- quantile(par_samps$omega, probs = 0.975)*1000 %>% round(2)
+
+diff <- par_samps$diff %>% mean %>% round(2)
+lower_diff <- quantile(par_samps$diff, probs = 0.025) %>% round(2)
+upper_diff <- quantile(par_samps$diff, probs = 0.975) %>% round(2)
+
+alpha1 = par_samps$alpha1 %>% mean %>% round(2)
+lower_alpha1 <- quantile(par_samps$alpha1, probs = 0.025) %>% round(2)
+upper_alpha1 <- quantile(par_samps$alpha1, probs = 0.975) %>% round(2)
+
+alpha2 = par_samps$alpha2 %>% mean %>% round(2)
+lower_alpha2 <- quantile(par_samps$alpha2, probs = 0.025) %>% round(2)
+upper_alpha2 <- quantile(par_samps$alpha2, probs = 0.975) %>% round(2)
+
+
+# create the table of results
+parameter <- c("change (omega)","mean1 (alpha1)", "mean2 (alpha2)", "difference (delta)")
+estimates <- c(change, alpha1, alpha2, diff)
+lower <- c(lower_change, lower_alpha1, lower_alpha2, lower_diff)
+upper <- c(upper_change, upper_alpha1, upper_alpha2, upper_diff)
+
+tab <- tibble(parameter = parameter, estimate = estimates, lower = lower, upper = upper)
+
+knitr::kable(tab)
+```
